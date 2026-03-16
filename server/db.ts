@@ -1,4 +1,5 @@
-import mssql from "mssql/msnodesqlv8.js";
+import mssql from "mssql";
+
 const databaseServerRaw = process.env.DATABASE_SERVER || "LAPTOP-4M368TIF\\SQLEXPRESS";
 const databaseName = process.env.DATABASE_NAME || "billing_application";
 const databaseInstance =
@@ -6,35 +7,62 @@ const databaseInstance =
 const databasePort = process.env.DATABASE_PORT ? Number(process.env.DATABASE_PORT) : undefined;
 const databaseServerHost = databaseServerRaw.includes("\\") ? databaseServerRaw.split("\\")[0] : databaseServerRaw;
 const databaseServer = databaseServerHost === "." || databaseServerHost.toLowerCase() === "(local)" ? "localhost" : databaseServerHost;
-const windowsAuth = (process.env.DATABASE_WINDOWS_AUTH || "true").toLowerCase() === "true";
 const databaseEncrypt = (process.env.DATABASE_ENCRYPT || "true").toLowerCase() === "true";
 const trustServerCertificate = (process.env.DATABASE_TRUST_SERVER_CERTIFICATE || "true").toLowerCase() === "true";
 
-const buildConfig = (server: string): any => {
-  const fullServer = databaseInstance && !databasePort ? `${server}\\${databaseInstance}` : server;
-  let connectionString = `Driver={ODBC Driver 17 for SQL Server};Server=${fullServer};Database=${databaseName};Trusted_Connection=yes;`;
+const buildConfig = (server: string): mssql.config => {
+  const config: mssql.config = {
+    server: server,
+    database: databaseName,
+    options: {
+      encrypt: databaseEncrypt,
+      trustServerCertificate: trustServerCertificate,
+      instanceName: databaseInstance,
+    },
+  };
 
-  if (databaseEncrypt) {
-    connectionString += "Encrypt=yes;";
+  if (databasePort) {
+    config.port = databasePort;
+  }
+
+  // IMPORTANT: For standard mssql, SQL Server Authentication is strongly recommended
+  // Set DATABASE_USER and DATABASE_PASSWORD in your .env
+  if (process.env.DATABASE_USER) {
+    config.user = process.env.DATABASE_USER;
+    config.password = process.env.DATABASE_PASSWORD || "";
   } else {
-    connectionString += "Encrypt=no;";
+    // If no user provided, standard mssql will attempt to connect without credentials
+    // which may fail unless you have specific setup or use connection strings.
+    console.warn("No DATABASE_USER provided. Connecting with standard mssql (tedious) usually requires SQL Server Authentication.");
   }
 
-  if (trustServerCertificate) {
-    connectionString += "TrustServerCertificate=yes;";
-  }
-
-  return { connectionString };
+  // If a full connection string is provided in env (e.g., Azure SQL URL format), prefer it
+  // But mssql.connect(string) works directly. For config object, we keep it as is.
+  return config;
 };
 
 async function connectWithFallback() {
+  // If DATABASE_URL is provided, use it directly (useful for Render/Render-hosted DBs)
+  if (process.env.DATABASE_URL) {
+    try {
+      console.log("Connecting using DATABASE_URL...");
+      // Filter out unsupported URL params for standard mssql if necessary,
+      // but mssql usually handles basic SQL server connection strings well.
+      return await mssql.connect(process.env.DATABASE_URL);
+    } catch (err: any) {
+      console.error("Failed to connect using DATABASE_URL:");
+      console.dir(err, { depth: null });
+      throw err;
+    }
+  }
+
   const hosts = [databaseServer, "localhost", "127.0.0.1"].filter((v, i, arr) => arr.indexOf(v) === i);
   let lastError: unknown;
 
   for (const host of hosts) {
     try {
       const config = buildConfig(host);
-      console.log(`Trying to connect to MSSQL host: ${host}, database: ${databaseName}, user: ${config.user}`);
+      console.log(`Trying to connect to MSSQL host: ${host}, database: ${databaseName}, user: ${config.user || 'none'}`);
       return await mssql.connect(config);
     } catch (err: any) {
       console.error(`Failed to connect with host ${host}:`);
