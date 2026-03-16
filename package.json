@@ -15,7 +15,8 @@
         "db:studio": "drizzle-kit studio",
         "db:check": "node scripts/check-db-connection.js",
         "dev:server": "node --env-file=.env --watch-path=server --import tsx server/index.ts",
-        "dev:client": "vite --port 5173 --strictPort"
+        "dev:client": "vite --port 5173 --strictPort",
+        "start": "node dist/server/index.js"
     },
     "dependencies": {
         "@hookform/resolvers": "^3.10.0",
